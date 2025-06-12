@@ -1,46 +1,96 @@
 server:
-  port: 0 # 자동 포트 할당
+  port: 8080
 
 spring:
   application:
     name: chat-service
-  config:
-    import: "configserver:http://config-service:8888"
   main:
     allow-bean-definition-overriding: true
+    
+  # Redis 설정
   data:
     redis:
-      host: redis
-      port: 6379 # Redis 서버 포트
+      host: localhost
+      port: 6379
+      
+  # MongoDB 설정
+  data:
+    mongodb:
+      host: localhost
+      port: 27017
+      database: chat-service
+      authentication-database: admin
+      uri: mongodb://localhost:27017/chat-service
+      
+  # MySQL 설정 (필요한 경우)
+  datasource:
+    url: jdbc:mysql://localhost:3306/chat_service?useSSL=false&serverTimezone=UTC&characterEncoding=UTF-8
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    
+  # JPA 설정
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        
+  # RabbitMQ 설정
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    stomp:
+      port: 61613
+    
+  # WebSocket 설정
+  websocket:
+    path: /ws
+    allowed-origins: "*"
+    stomp:
+      broker-relay:
+        enabled: true
 
-eureka:
-  client:
-    service-url:
-      defaultZone: http://discovery-service:8761/eureka/ # Eureka 서버 주소
-    register-with-eureka: true
-    fetch-registry: true
-  instance:
-    prefer-ip-address: true
-
+# RabbitMQ Exchange 설정
 rabbitmq:
   chat-exchange:
-    name: "chat.exchange" # 사용할 exchange 이름 (구독할 때 사용)
+    name: "chat.exchange"
 
+# Swagger 설정
 springdoc:
   api-docs:
     version: openapi_3_1
     enabled: true
-    #path: /api/mail/v3/api-docs
-    # 게이트웨이 라우팅에서 prefix를 제거하지 않았다면 해당 설정을 추가
-  enable-spring-security: true
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+    default-models-expand-depth: -1
   default-consumes-media-type: application/json
   default-produces-media-type: application/json
 
-
-
+# 로깅 설정
 logging:
   level:
-    org.springframework.web: DEBUG
-    org.springframework.cloud.gateway: DEBUG
+    root: INFO
+    com.homeless.chatservice: DEBUG
+    org.springframework.data.mongodb: DEBUG
+    org.springframework.data.redis: DEBUG
     org.springframework.amqp: DEBUG
-    org.springframework.amqp.rabbit.core.RabbitAdmin: DEBUG
+
+# JWT 설정
+jwt:
+  secret-key: "your-256-bit-secret-key-here-please-change-this-to-your-secure-key"
+  expiration: 86400000 # 24시간
+
+# AWS S3 설정 (필요한 경우에만 설정)
+aws:
+  s3:
+    bucket: your-bucket-name
+    region: ap-northeast-2
+    access-key: your-access-key
+    secret-key: your-secret-key

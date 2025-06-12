@@ -23,28 +23,26 @@ public class AwsS3Config {
     // S3 버킷을 제어하는 객체
     private S3Client s3Client;
 
-    @Value("${spring.cloud.aws.credentials.accessKey}")
+    @Value("${aws.s3.access-key}")
     private String accessKey;
-    @Value("${spring.cloud.aws.credentials.secretKey}")
+    @Value("${aws.s3.secret-key}")
     private String secretKey;
-    @Value("${spring.cloud.aws.region.static}")
+    @Value("${aws.s3.region}")
     private String region;
-    @Value("${spring.cloud.aws.s3.bucket}")
+    @Value("${aws.s3.bucket}")
     private String bucketName;
 
     // S3에 연결해서 인증을 처리하는 로직
     @PostConstruct // 클래스를 기반으로 객체가 생성될 때 1번만 실행되는 아노테이션
     private void initializeAmazonS3Client() {
+        AwsBasicCredentials credentials = AwsBasicCredentials.create(accessKey, secretKey);
 
-        // 액세스 키와 시크릿 키를 이용해서 계정 인증 받기
-        AwsBasicCredentials credentials
-                = AwsBasicCredentials.create(accessKey, secretKey);
-
-        // 지역 설정 및 인증 정보를 담은 S3Client 객체를 위의 s3 변수에 세팅
         this.s3Client = S3Client.builder()
                 .region(Region.of(region))
                 .credentialsProvider(StaticCredentialsProvider.create(credentials))
                 .build();
+        
+        log.info("AWS S3 client initialized for region: {}", region);
     }
 
     /**
@@ -54,23 +52,22 @@ public class AwsS3Config {
      * @param fileName   - 업로드 할 파일명
      * @return - 버킷에 업로드 된 버킷 경로(url)
      */
-    public String uploadToS3Bucket(byte[] uploadFile, String fileName) {
+    public String uploadFile(byte[] uploadFile, String fileName) {
+        try {
+            PutObjectRequest request = PutObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(fileName)
+                    .build();
 
-        // 업로드 할 파일을 S3 오브젝트로 생성.
-        PutObjectRequest request = PutObjectRequest.builder()
-                .bucket(bucketName)
-                .key(fileName)
-                .build();
-
-        // 오브젝트를 버킷에 업로드 (위에서 선언한 오브젝트, 업로드 하고자 하는 파일(바이트배열))
-        s3Client.putObject(request, RequestBody.fromBytes(uploadFile));
-
-        // 업로드 되는 파일의 url을 리턴.
-        return s3Client.utilities()
-                .getUrl(b -> b.bucket(bucketName).key(fileName))
-                .toString();
+            s3Client.putObject(request, RequestBody.fromBytes(uploadFile));
+            
+            return String.format("https://%s.s3.%s.amazonaws.com/%s", 
+                    bucketName, region, fileName);
+        } catch (Exception e) {
+            log.error("Error uploading file to S3: {}", e.getMessage());
+            throw new RuntimeException("Failed to upload file to S3", e);
+        }
     }
-
 
     // 버킷에 업로드 된 이미지를 삭제하는 로직
     // 버킷에 오브젝트를 지우기 위해서는 키값을 줘야 하는데
@@ -78,22 +75,22 @@ public class AwsS3Config {
 
     // 우리가 가진 데이터: https://orderservice-prod-img8917.s3.ap-northeast-2.amazonaws.com/74b59c79-d5da-4d05-b99a-557f00b4da07_fileName.gif
     // 가공 결과: 74b59c79-d5da-4d05-b99a-557f00b4da07_fileName.gif
-    public void deleteFromS3Bucket(String fileName) throws Exception {
-        log.info("Deleting file {}", fileName);
+    public void deleteFile(String fileUrl) {
+        try {
+            URL url = new URL(fileUrl);
+            String path = url.getPath();
+            String fileName = URLDecoder.decode(path.substring(1), "UTF-8");
 
-        URL url = new URL(fileName);
+            DeleteObjectRequest request = DeleteObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(fileName)
+                    .build();
 
-        // getPath()를 통해 key값 앞에 "/"까지 포함해서 제거.
-        String decodingKey = URLDecoder.decode(url.getPath(), "UTF-8");
-        String key = decodingKey.substring(1);
-        log.info("Deleting key {}", key);
-
-
-        DeleteObjectRequest request = DeleteObjectRequest.builder()
-                .bucket(bucketName)
-                .key(key)
-                .build();
-
-        s3Client.deleteObject(request);
+            s3Client.deleteObject(request);
+            log.info("Successfully deleted file: {}", fileName);
+        } catch (Exception e) {
+            log.error("Error deleting file from S3: {}", e.getMessage());
+            throw new RuntimeException("Failed to delete file from S3", e);
+        }
     }
 }
