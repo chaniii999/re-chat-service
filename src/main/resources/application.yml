@@ -12,21 +12,17 @@ spring:
     redis:
       host: localhost
       port: 6379
-      
-  # MongoDB 설정
-  data:
+
     mongodb:
-      host: localhost
-      port: 27017
+      uri: mongodb+srv://<username>:<password>@<cluster-url>/<database>?retryWrites=true&w=majority
       database: chat-service
       authentication-database: admin
-      uri: mongodb://localhost:27017/chat-service
       
   # MySQL 설정 (필요한 경우)
   datasource:
     url: jdbc:mysql://localhost:3306/chat_service?useSSL=false&serverTimezone=UTC&characterEncoding=UTF-8
     username: root
-    password: root
+    password: mysql
     driver-class-name: com.mysql.cj.jdbc.Driver
     
   # JPA 설정

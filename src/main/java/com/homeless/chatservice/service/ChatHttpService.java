@@ -127,9 +127,6 @@ public class ChatHttpService {
     public void deleteMessage(String chatId) throws Exception {
         ChatMessage chatMessage = chatMessageRepository.findById(chatId).orElseThrow();
 
-        if (chatMessage.getFileUrl() != null) {
-            awsS3Config.deleteFromS3Bucket(chatMessage.getFileUrl());
-        }
         chatMessageRepository.deleteById(chatId);
     }
 
