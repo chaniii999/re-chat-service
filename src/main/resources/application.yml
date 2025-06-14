@@ -77,16 +77,3 @@ logging:
     org.springframework.data.mongodb: DEBUG
     org.springframework.data.redis: DEBUG
     org.springframework.amqp: DEBUG
-
-# JWT 설정
-jwt:
-  secret-key: "your-256-bit-secret-key-here-please-change-this-to-your-secure-key"
-  expiration: 86400000 # 24시간
-
-# AWS S3 설정 (필요한 경우에만 설정)
-aws:
-  s3:
-    bucket: your-bucket-name
-    region: ap-northeast-2
-    access-key: your-access-key
-    secret-key: your-secret-key
