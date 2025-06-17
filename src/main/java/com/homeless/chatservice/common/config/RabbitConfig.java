@@ -31,6 +31,15 @@ public class RabbitConfig {
 
     @Value("${spring.rabbitmq.host}")
     private String RABBITMQ_HOST;
+    
+    @Value("${spring.rabbitmq.port}")
+    private int RABBITMQ_PORT;
+    
+    @Value("${spring.rabbitmq.username}")
+    private String RABBITMQ_USERNAME;
+    
+    @Value("${spring.rabbitmq.password}")
+    private String RABBITMQ_PASSWORD;
 
     // 실제로 메시지가 저장되는 공간인 Queue.
     // Bean으로 등록하지 않고, 채널이 생성될 때 직접 호출할 예정이다.
@@ -45,7 +54,6 @@ public class RabbitConfig {
     public TopicExchange chatExchange() {
         return new TopicExchange(CHAT_EXCHANGE_NAME);
     }
-
 
     // Binding 생성 메서드 (빈 등록하지 않고 동적 생성으로 변경)
     public Binding createChatChannelBinding(Queue queue, String channelId) {
@@ -63,7 +71,6 @@ public class RabbitConfig {
         return rabbitTemplate;
     }
 
-
     // 스프링의 메시지 추상화를 RabbitMQ에 적용. 좀 더 높은 수준의 메시지 기능을 제공.
     // 반드시 필요한 것은 아님. 기본 RabbitTemplate 사용해도 괜춘.
     @Bean
@@ -76,14 +83,16 @@ public class RabbitConfig {
     public ConnectionFactory connectionFactory() {
         CachingConnectionFactory factory = new CachingConnectionFactory();
         factory.setHost(RABBITMQ_HOST);
-        factory.setUsername("guest"); // RabbitMQ 관리자 아이디
-        factory.setPassword("guest"); // RabbitMQ 관리자 비밀번호
-        factory.setPort(5672); // RabbitMQ 연결할 port
-        factory.setVirtualHost("/"); // vhost 지정
-
+        factory.setPort(RABBITMQ_PORT);
+        factory.setUsername(RABBITMQ_USERNAME);
+        factory.setPassword(RABBITMQ_PASSWORD);
+        factory.setVirtualHost("/");
+        
+        // 연결 실패 시 재시도 설정
+        factory.setConnectionTimeout(5000);
+        
         return factory;
     }
-
 
     // 직렬화 : 메세지를 JSON 으로 변환하는 Message Converter
     @Bean
@@ -106,8 +115,9 @@ public class RabbitConfig {
         log.info("Checking RabbitMQ configuration...");
         log.info("CHAT_EXCHANGE_NAME: {}", CHAT_EXCHANGE_NAME);
         log.info("RABBITMQ_HOST: {}", RABBITMQ_HOST);
+        log.info("RABBITMQ_PORT: {}", RABBITMQ_PORT);
+        log.info("RABBITMQ_USERNAME: {}", RABBITMQ_USERNAME);
     }
-
 
     // 스프링 컨텍스트가 완전히 로드가 된 이후 발생하는 이벤트 리스너 메서드.
     // 모든 컴포넌트를 명시적으로 선언. 이미 존재하는 경우에는 무시하고 존재하지 않을 때에만 생성.
@@ -119,12 +129,10 @@ public class RabbitConfig {
         try {
             TopicExchange exchange = new TopicExchange(CHAT_EXCHANGE_NAME, true, false);
             admin.declareExchange(exchange);
-
+            log.info("Successfully declared exchange: {}", CHAT_EXCHANGE_NAME);
         } catch (Exception e) {
             log.error("Error during RabbitMQ initialization", e);
             throw e;
         }
     }
-
-
 }

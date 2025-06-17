@@ -13,10 +13,15 @@ import org.springframework.util.AntPathMatcher;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
+import org.springframework.web.socket.config.annotation.WebSocketTransportRegistration;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.web.filter.CorsFilter;
+import org.springframework.context.annotation.Bean;
 import reactor.netty.tcp.TcpClient;
 
 @Configuration
-@EnableWebSocketMessageBroker // WebSocket을 통한 메시지 브로커 기능 활성화하기
+@EnableWebSocketMessageBroker
 @Slf4j
 @RequiredArgsConstructor
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
@@ -25,51 +30,52 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Value("${spring.rabbitmq.host}")
     private String RABBITMQ_HOST;
 
+    @Bean
+    public CorsFilter corsFilter() {
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        CorsConfiguration config = new CorsConfiguration();
+        config.addAllowedOrigin("*");
+        config.addAllowedHeader("*");
+        config.addAllowedMethod("*");
+        config.setAllowCredentials(true);
+        source.registerCorsConfiguration("/**", config);
+        return new CorsFilter(source);
+    }
+
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
-        // STOMP 인터셉터 추가
         registration.interceptors(stompInterceptor);
     }
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        // stomp 접속 주소 url = ws://localhost:8181/ws
-        registry.addEndpoint("/ws") // 연결될 엔드포인트
+        registry.addEndpoint("/ws")
                 .setAllowedOriginPatterns("*")
-                .withSockJS(); // WebSocket을 지원하지 않는 브라우저를 위한 옵션
+                .setAllowedOrigins("*")
+                .withSockJS();
+    }
+
+    @Override
+    public void configureWebSocketTransport(WebSocketTransportRegistration registration) {
+        registration.setMessageSizeLimit(128 * 1024)
+                   .setSendBufferSizeLimit(512 * 1024)
+                   .setSendTimeLimit(20000);
     }
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
-        // 비동기 TCP 클라이언트를 따로 구성해 준다. (나중에 보안 연결을 위해서도 필요함.)
-        TcpClient tcpClient = TcpClient
-                .create()
-                .host(RABBITMQ_HOST)
-                .port(61613); // STOMP 프로토콜의 기본 포트번호는 61613
-
-        ReactorNettyTcpClient<byte[]> client = new ReactorNettyTcpClient<>(tcpClient, new StompReactorNettyCodec());
-
-        // Spring 내장 메세지 브로커 대신 외부 메세지 브로커를 사용하도록 지시하는 설정. 고정값이라 변경 안됨! (RabbitMQ에서 정한 값)
-        /*
-        /queue: point-to-point 메시징을 보낼 때 사용
-        /topic: 발행/구독(pub/sub) 메시징에 사용
-        /exchange: RabbitMQ의 exchange를 직접 지정할 때 사용
-        /amq/queue: RabbitMQ의 특정 큐에 직접 메시지를 보낼 때 사
-         */
-
         registry.enableStompBrokerRelay("/queue", "/topic", "/exchange", "/amq/queue")
                 .setAutoStartup(true)
-                .setTcpClient(client) // RabbitMQ와 연결할 클라이언트 설정
-                .setRelayHost(RABBITMQ_HOST) // RabbitMQ 서버 주소
-                .setRelayPort(61613) // RabbitMQ 포트(5672), STOMP(61613)
-                .setSystemLogin("guest") // RabbitMQ 시스템 계정
-                .setSystemPasscode("guest") // RabbitMQ 시스템 비밀번호
-                .setClientLogin("guest") // RabbitMQ 클라이언트 계정
-                .setClientPasscode("guest"); // RabbitMQ 클라이언트 비밀번호
+                .setRelayHost(RABBITMQ_HOST)
+                .setRelayPort(61613)
+                .setSystemLogin("guest")
+                .setSystemPasscode("guest")
+                .setClientLogin("guest")
+                .setClientPasscode("guest")
+                .setVirtualHost("/");
 
-        registry.setPathMatcher(new AntPathMatcher(".")); // url을 chat/room/3 -> chat.room.3으로 참조하기 위한 설정
-        registry.setApplicationDestinationPrefixes("/pub"); // 클라이언트에서 메시지 발행 시 사용할 접두어를 pub으로 세팅.
-        
+        registry.setApplicationDestinationPrefixes("/pub");
+        registry.setUserDestinationPrefix("/user");
+        registry.setPathMatcher(new AntPathMatcher("."));
     }
-
 }

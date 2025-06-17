@@ -1,22 +1,19 @@
 server:
-  port: 8080
+  port: 8081
 
 spring:
   application:
     name: chat-service
   main:
     allow-bean-definition-overriding: true
+  profiles:
+    active: local
     
   # Redis 설정
   data:
     redis:
       host: localhost
       port: 6379
-
-    mongodb:
-      uri: mongodb+srv://<username>:<password>@<cluster-url>/<database>?retryWrites=true&w=majority
-      database: chat-service
-      authentication-database: admin
       
   # MySQL 설정 (필요한 경우)
   datasource:
@@ -48,9 +45,6 @@ spring:
   websocket:
     path: /ws
     allowed-origins: "*"
-    stomp:
-      broker-relay:
-        enabled: true
 
 # RabbitMQ Exchange 설정
 rabbitmq:

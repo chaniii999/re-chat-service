@@ -1,0 +1,116 @@
+import ws from 'k6/ws';
+import { check, sleep } from 'k6';
+import { Rate, Trend } from 'k6/metrics';
+
+// 📊 메트릭
+const connectionSuccessRate = new Rate('ws_connection_success');
+const messageSuccessRate = new Rate('ws_message_success');
+const messageLatency = new Trend('ws_message_latency');
+const messageDeliveryTime = new Trend('ws_message_delivery_time');
+
+// 🧪 부하 옵션
+export const options = {
+  stages: [
+    { duration: '1m', target: 50 },  // 램프업
+    { duration: '3m', target: 50 },  // 유지
+    { duration: '1m', target: 0 },   // 램프다운
+  ],
+  thresholds: {
+    'ws_connection_success': ['rate>0.95'],
+    'ws_message_success': ['rate>0.95'],
+    'ws_message_latency': ['p(95)<1000'],
+    'ws_message_delivery_time': ['p(95)<2000'],
+  },
+};
+
+// 🧬 테스트 대상
+const JWT = 'Bearer YOUR_VALID_JWT_HERE';
+const CHANNELS = ['channel-1', 'channel-2', 'channel-3', 'channel-4', 'channel-5'];
+const MESSAGES = [
+  '5fEHXeUTPvcRi4KsQegy', 'BwsgoerKnKwSssYQOK2q', 'GrqlWk07Ns2oL4TegScH',
+  'xz0YIa18kE7OC4isR2my', 'FvCwezt18V73D9BR5j6p', 'lI5XfAvL3He3kIS9RpOh',
+  'szLUP7xJGo4aXWjliq1c', '7kUoeMFlO2qLabZaCi1s', '88a1yW1h3zsK1bcPcj9G', 'RGUOsxDJNjtkkcawE5XD'
+];
+
+const random = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+export default function () {
+  const channelId = random(CHANNELS);
+  const messageText = random(MESSAGES);
+  const url = 'ws://localhost:8081/ws';
+  let messageSent = false;
+  let messageReceived = false;
+  let startTime = 0;
+
+  const res = ws.connect(url, (socket) => {
+    let isSubscribed = false;
+
+    socket.on('open', () => {
+      console.log(`🔗 연결됨 → ${channelId}`);
+      connectionSuccessRate.add(1);
+      socket.send(`CONNECT\naccept-version:1.1\nheart-beat:0,0\nAuthorization:${JWT}\n\0`);
+    });
+
+    socket.on('message', (data) => {
+      if (data.includes('CONNECTED') && !isSubscribed) {
+        console.log('✅ STOMP 연결 성공');
+        socket.send(`SUBSCRIBE\nid:sub-0\ndestination:/exchange/chat.exchange/chat.channel.${channelId}\n\0`);
+        isSubscribed = true;
+        console.log('📨 SUBSCRIBE 프레임 전송');
+
+        // 메시지 전송 전에 약간의 지연을 주어 구독이 완료되도록 함
+        setTimeout(() => {
+          startTime = Date.now();
+          const payload = `SEND\ndestination:/pub/chat.message.${channelId}\ncontent-type:application/json\nAuthorization:${JWT}\n\n${JSON.stringify({
+            serverId: "test-server",
+            email: "test@example.com",
+            writer: "test-user",
+            content: messageText,
+            messageType: "TALK",
+            fileUrl: null,
+            fileName: null
+          })}\0`;
+
+          socket.send(payload);
+          messageSent = true;
+          messageLatency.add(Date.now() - startTime);
+          console.log(`📤 전송 (${channelId}): ${messageText}`);
+        }, 2000); // 2초 지연
+      }
+
+      if (data.includes('MESSAGE')) {
+        const messageTime = Date.now() - startTime;
+        messageDeliveryTime.add(messageTime);
+        
+        if (data.includes(channelId) && data.includes(messageText)) {
+          messageSuccessRate.add(1);
+          messageReceived = true;
+          console.log(`✅ 수신 성공 (${messageTime}ms): ${data}`);
+        }
+      }
+
+      if (data.includes('ERROR')) {
+        connectionSuccessRate.add(0);
+        messageSuccessRate.add(0);
+        console.error('❌ 에러:', data);
+        socket.close();
+      }
+    });
+
+    socket.on('close', () => {
+      if (!messageReceived && messageSent) {
+        messageSuccessRate.add(0);
+      }
+      console.log('🔌 연결 종료');
+    });
+
+    socket.on('error', (e) => {
+      console.error('❗ 연결 실패:', e);
+      connectionSuccessRate.add(0);
+      messageSuccessRate.add(0);
+    });
+  });
+
+  check(res, { '✅ 연결 성공': (r) => r && r.status === 101 });
+  sleep(5); // 각 VU가 5초 동안 유지
+}

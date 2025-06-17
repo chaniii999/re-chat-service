@@ -1,6 +1,5 @@
 package com.homeless.chatservice.controller;
 
-
 import com.homeless.chatservice.common.auth.JwtUtils;
 import com.homeless.chatservice.common.exception.TokenValidationException;
 import com.homeless.chatservice.dto.*;
@@ -36,49 +35,46 @@ public class WebSocketController {
     private final DtoBuilder dtoBuilder;
 
     private final String CHAT_DESTINATION = "/exchange/chat.exchange/chat.channel.";
-    // 채팅 메시지 수신 및 저장
-    @MessageMapping("chat.message.{channelId}")
+
+    @MessageMapping("/pub/chat.message.{channelId}")
     @Operation(summary = "메시지 전송", description = "메시지를 전송합니다.")
     @Transactional
     public void sendMessage(@DestinationVariable String channelId,
-                            ChatMessageRequest chatReqDto) {
-
-
-
+                          ChatMessageRequest chatReqDto) {
         try {
             if (chatReqDto.content() == null && chatReqDto.fileUrl() == null) {
-                throw new IllegalArgumentException("Message text cannot be empty");
+                throw new IllegalArgumentException("Message content cannot be empty");
             }
 
-            // 메시지 저장 후 생성된 chatId
-            String chatId = dtoBuilder.saveChatMessage(channelId,chatReqDto);
+            // 메시지 저장 및 DTO 변환
+            String chatId = dtoBuilder.saveChatMessage(channelId, chatReqDto);
+            MessageDto messageDto = dtoBuilder.buildMessageDto(chatId, channelId, chatReqDto);
 
-            // 4. ChatMessageRequest -> MessageDto 변환
-            MessageDto messageDto = dtoBuilder.buildMessageDto(chatId,channelId,chatReqDto);
-
-            // 5. 메시지 DB 저장
+            // 메시지 전송
             messageService.sendMessageFromRabbitMQ(messageDto);
-            // 6. 성공 응답
+
+            // 성공 응답
             Map<String, Object> result = new HashMap<>();
             result.put("chatId", chatId);
-            CommonResDto<Object> commonResDto = new CommonResDto<>(HttpStatus.OK, "메시지 저장 완료", result);
-
-            // 8.클라이언트로 응답 전송 (웹소켓을 통해)
-            simpMessagingTemplate.convertAndSend(CHAT_DESTINATION + channelId, commonResDto);
+            result.put("status", "success");
+            result.put("message", "Message sent successfully");
+            
+            simpMessagingTemplate.convertAndSend(CHAT_DESTINATION + channelId, result);
 
         } catch (IllegalArgumentException e) {
             log.error("Invalid message content for channel: {}. Error: {}", channelId, e.getMessage());
-            // 예외 처리: 파라미터 오류
-            CommonResDto<Object> errorResDto = new CommonResDto<>(HttpStatus.BAD_REQUEST, "Invalid message content", null);
-            simpMessagingTemplate.convertAndSend(CHAT_DESTINATION + channelId, errorResDto);
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("status", "error");
+            errorResult.put("message", "Invalid message content");
+            simpMessagingTemplate.convertAndSend(CHAT_DESTINATION + channelId, errorResult);
         } catch (Exception e) {
             log.error("Error while sending message for channel: {}. Error: {}", channelId, e.getMessage(), e);
-            // 예외 처리: 저장 실패
-            CommonResDto<Object> errorResDto = new CommonResDto<>(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to save message",null);
-            simpMessagingTemplate.convertAndSend(CHAT_DESTINATION + channelId, errorResDto);
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("status", "error");
+            errorResult.put("message", "Failed to send message");
+            simpMessagingTemplate.convertAndSend(CHAT_DESTINATION + channelId, errorResult);
         }
     }
-
 
     @MessageMapping("chat.message.delete.{channelId}")
     @SendTo("/exchange/chat.exchange/chat.channel.{channelId}")

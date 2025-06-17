@@ -14,11 +14,8 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 @Slf4j
 public class MongoConfig extends AbstractMongoClientConfiguration {
 
-    @Value("${spring.data.mongodb.host}")
-    private String host;
-    
-    @Value("${spring.data.mongodb.port}")
-    private int port;
+    @Value("${spring.data.mongodb.uri}")
+    private String uri;
     
     @Value("${spring.data.mongodb.database}")
     private String database;
@@ -32,7 +29,6 @@ public class MongoConfig extends AbstractMongoClientConfiguration {
     @Override
     @NonNull
     public MongoClient mongoClient() {
-        String uri = String.format("mongodb://%s:%d", host, port);
         log.info("Connecting to MongoDB: {}", uri);
         return MongoClients.create(uri);
     }
