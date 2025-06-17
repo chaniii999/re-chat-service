@@ -51,7 +51,7 @@ public class StompMessageService {
 
             // 3. 메시지 전송
             String routingKey = "chat.channel." + message.getChannelId();
-            String destination = "/exchange/chat.exchange/chat.channel." + message.getChannelId();
+            String destination = "/topic/chat.channel." + message.getChannelId();
             
             // RabbitMQ로 메시지 전송
             rabbitTemplate.convertAndSend(
@@ -59,11 +59,12 @@ public class StompMessageService {
                     routingKey,
                     message
             );
-            
+            log.info("Message sent to RabbitMQ - exchange: {}, routingKey: {}", CHAT_EXCHANGE_NAME, routingKey);
+
             // WebSocket으로 직접 메시지 전송
             messagingTemplate.convertAndSend(destination, message);
+            log.info("Message sent to WebSocket - destination: {}", destination);
             
-            log.info("Message sent successfully - destination: {}, routingKey: {}", destination, routingKey);
         } catch (Exception e) {
             log.error("Error sending message: {}", e.getMessage(), e);
             throw e;

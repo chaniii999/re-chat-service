@@ -24,12 +24,16 @@ public class StompInterceptor implements ChannelInterceptor {
         StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
 
         if (accessor != null) {
+            log.info("Received STOMP command: {}", accessor.getCommand());
+            log.info("STOMP headers: {}", accessor.toNativeHeaderMap());
+            
             // CONNECT 및 SEND 요청에서만 처리
             if (StompCommand.CONNECT.equals(accessor.getCommand()) ||
                     StompCommand.SEND.equals(accessor.getCommand())) {
 
                 // 1. Authorization 헤더 추출
                 String authorizationHeader = accessor.getFirstNativeHeader("Authorization");
+                log.info("Authorization header: {}", authorizationHeader);
 
                 // 2. 토큰 검증
                 if (authorizationHeader == null || !authorizationHeader.startsWith("Bearer ")) {
@@ -53,12 +57,22 @@ public class StompInterceptor implements ChannelInterceptor {
                     log.error("Token validation failed: {} in StompInterceptor", e.getMessage());
                     throw new UnauthorizedException("401", "Invalid token: " + e.getMessage());
                 }
+                
+                // CONNECT 프레임인 경우 로깅 추가
+                if (StompCommand.CONNECT.equals(accessor.getCommand())) {
+                    log.info("Processing CONNECT frame, will send CONNECTED frame");
+                }
+            }
+            // SEND 프레임에 대한 상세 로그 추가
+            if (StompCommand.SEND.equals(accessor.getCommand())) {
+                log.info("[STOMP] Received SEND command");
+                log.info("[STOMP] SEND headers: {}", accessor.toNativeHeaderMap());
+                log.info("[STOMP] SEND payload: {}", new String((byte[]) message.getPayload()));
             }
         }
 
         return message;
     }
-
 
     @Override
     public void postSend(Message<?> message, MessageChannel channel, boolean sent) {

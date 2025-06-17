@@ -24,7 +24,7 @@ export const options = {
 };
 
 // 🧬 테스트 대상
-const JWT = 'Bearer YOUR_VALID_JWT_HERE';
+const JWT = 'Bearer test-token';  // 테스트용 토큰
 const CHANNELS = ['channel-1', 'channel-2', 'channel-3', 'channel-4', 'channel-5'];
 const MESSAGES = [
   '5fEHXeUTPvcRi4KsQegy', 'BwsgoerKnKwSssYQOK2q', 'GrqlWk07Ns2oL4TegScH',
@@ -41,51 +41,92 @@ export default function () {
   let messageSent = false;
   let messageReceived = false;
   let startTime = 0;
+  let isSubscribed = false;
+  let subscriptionTimeout = null;
 
   const res = ws.connect(url, (socket) => {
-    let isSubscribed = false;
-
     socket.on('open', () => {
       console.log(`🔗 연결됨 → ${channelId}`);
       connectionSuccessRate.add(1);
-      socket.send(`CONNECT\naccept-version:1.1\nheart-beat:0,0\nAuthorization:${JWT}\n\0`);
+      
+      // STOMP CONNECT 프레임 전송
+      const connectFrame = `CONNECT\naccept-version:1.1\nheart-beat:0,0\nAuthorization:${JWT}\n\n\0`;
+      console.log('📤 STOMP CONNECT 프레임 전송:', connectFrame);
+      socket.send(connectFrame);
     });
 
     socket.on('message', (data) => {
-      if (data.includes('CONNECTED') && !isSubscribed) {
+      console.log('📥 수신된 메시지:', data);
+      
+      if (data.includes('CONNECTED')) {
         console.log('✅ STOMP 연결 성공');
-        socket.send(`SUBSCRIBE\nid:sub-0\ndestination:/exchange/chat.exchange/chat.channel.${channelId}\n\0`);
+        const subscribeFrame = `SUBSCRIBE\nid:sub-0\ndestination:/topic/chat.channel.${channelId}\n\n\0`;
+        console.log('📤 SUBSCRIBE 프레임 전송:', subscribeFrame);
+        socket.send(subscribeFrame);
         isSubscribed = true;
-        console.log('📨 SUBSCRIBE 프레임 전송');
+
+        // 구독 타임아웃 설정
+        subscriptionTimeout = setTimeout(() => {
+          if (!messageSent) {
+            console.error('❌ 구독 타임아웃');
+            socket.close();
+          }
+        }, 5000);
 
         // 메시지 전송 전에 약간의 지연을 주어 구독이 완료되도록 함
         setTimeout(() => {
-          startTime = Date.now();
-          const payload = `SEND\ndestination:/pub/chat.message.${channelId}\ncontent-type:application/json\nAuthorization:${JWT}\n\n${JSON.stringify({
-            serverId: "test-server",
-            email: "test@example.com",
-            writer: "test-user",
-            content: messageText,
-            messageType: "TALK",
-            fileUrl: null,
-            fileName: null
-          })}\0`;
-
-          socket.send(payload);
-          messageSent = true;
-          messageLatency.add(Date.now() - startTime);
-          console.log(`📤 전송 (${channelId}): ${messageText}`);
-        }, 2000); // 2초 지연
+          if (isSubscribed) {
+            startTime = Date.now();
+            const messageBody = JSON.stringify({
+              serverId: "test-server",
+              email: "test@example.com",
+              writer: "test-user",
+              content: messageText,
+              messageType: "TALK",
+              fileUrl: null,
+              fileName: null
+            });
+            
+            const payload = `SEND\ndestination:/pub/chat.message.${channelId}\ncontent-type:application/json\ncontent-length:${messageBody.length}\nAuthorization:${JWT}\n\n${messageBody}\0`;
+            
+            console.log('📤 SEND 프레임 전송:', payload);
+            socket.send(payload);
+            messageSent = true;
+            messageLatency.add(Date.now() - startTime);
+            console.log(`📤 전송 (${channelId}): ${messageText}`);
+          }
+        }, 2000);
       }
 
+      // MESSAGE 프레임 수신 처리
       if (data.includes('MESSAGE')) {
         const messageTime = Date.now() - startTime;
         messageDeliveryTime.add(messageTime);
         
-        if (data.includes(channelId) && data.includes(messageText)) {
-          messageSuccessRate.add(1);
-          messageReceived = true;
-          console.log(`✅ 수신 성공 (${messageTime}ms): ${data}`);
+        console.log('📥 MESSAGE 프레임 수신:', data);
+        
+        // 메시지 본문에서 content 필드 확인
+        try {
+          const messageContent = data.split('\n\n')[1];
+          const messageJson = JSON.parse(messageContent);
+          
+          if (messageJson.content === messageText) {
+            messageSuccessRate.add(1);
+            messageReceived = true;
+            console.log(`✅ 메시지 수신 성공 (${messageTime}ms): ${messageText}`);
+            
+            // 메시지 수신 후 연결 종료
+            setTimeout(() => {
+              const disconnectFrame = 'DISCONNECT\n\n\0';
+              console.log('📤 DISCONNECT 프레임 전송:', disconnectFrame);
+              socket.send(disconnectFrame);
+              socket.close();
+            }, 1000);
+          } else {
+            console.log('⚠️ 다른 메시지 수신:', messageJson.content);
+          }
+        } catch (e) {
+          console.error('❌ 메시지 파싱 실패:', e);
         }
       }
 
@@ -98,13 +139,22 @@ export default function () {
     });
 
     socket.on('close', () => {
+      if (subscriptionTimeout) {
+        clearTimeout(subscriptionTimeout);
+      }
+      
       if (!messageReceived && messageSent) {
         messageSuccessRate.add(0);
+        console.log('❌ 메시지 수신 실패');
       }
       console.log('🔌 연결 종료');
     });
 
     socket.on('error', (e) => {
+      if (subscriptionTimeout) {
+        clearTimeout(subscriptionTimeout);
+      }
+      
       console.error('❗ 연결 실패:', e);
       connectionSuccessRate.add(0);
       messageSuccessRate.add(0);

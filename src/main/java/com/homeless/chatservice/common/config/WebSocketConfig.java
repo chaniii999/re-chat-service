@@ -7,8 +7,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
-import org.springframework.messaging.simp.stomp.StompReactorNettyCodec;
-import org.springframework.messaging.tcp.reactor.ReactorNettyTcpClient;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
@@ -18,7 +16,6 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
 import org.springframework.context.annotation.Bean;
-import reactor.netty.tcp.TcpClient;
 
 @Configuration
 @EnableWebSocketMessageBroker
@@ -32,9 +29,10 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Bean
     public CorsFilter corsFilter() {
+        log.info("Configuring CORS filter...");
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         CorsConfiguration config = new CorsConfiguration();
-        config.addAllowedOrigin("*");
+        config.addAllowedOriginPattern("*");
         config.addAllowedHeader("*");
         config.addAllowedMethod("*");
         config.setAllowCredentials(true);
@@ -44,26 +42,22 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
+        log.info("Configuring client inbound channel...");
         registration.interceptors(stompInterceptor);
     }
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
+        log.info("Registering STOMP endpoints...");
         registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns("*")
-                .setAllowedOrigins("*")
-                .withSockJS();
-    }
-
-    @Override
-    public void configureWebSocketTransport(WebSocketTransportRegistration registration) {
-        registration.setMessageSizeLimit(128 * 1024)
-                   .setSendBufferSizeLimit(512 * 1024)
-                   .setSendTimeLimit(20000);
+                .setAllowedOriginPatterns("*");
     }
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
+        log.info("Configuring message broker with RabbitMQ host: {}", RABBITMQ_HOST);
+        
+        // RabbitMQ 브로커 설정
         registry.enableStompBrokerRelay("/queue", "/topic", "/exchange", "/amq/queue")
                 .setAutoStartup(true)
                 .setRelayHost(RABBITMQ_HOST)
@@ -74,8 +68,17 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 .setClientPasscode("guest")
                 .setVirtualHost("/");
 
-        registry.setApplicationDestinationPrefixes("/pub");
-        registry.setUserDestinationPrefix("/user");
         registry.setPathMatcher(new AntPathMatcher("."));
+        registry.setApplicationDestinationPrefixes("/pub", "/exchange");
+        
+        log.info("Message broker configured with RabbitMQ");
+    }
+
+    @Override
+    public void configureWebSocketTransport(WebSocketTransportRegistration registration) {
+        log.info("Configuring WebSocket transport...");
+        registration.setMessageSizeLimit(128 * 1024)
+                   .setSendBufferSizeLimit(512 * 1024)
+                   .setSendTimeLimit(20000);
     }
 }

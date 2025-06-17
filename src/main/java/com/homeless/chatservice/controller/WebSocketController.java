@@ -15,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.MessageMapping;
+import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
@@ -34,45 +35,51 @@ public class WebSocketController {
     private final JwtUtils jwtUtils;
     private final DtoBuilder dtoBuilder;
 
-    private final String CHAT_DESTINATION = "/exchange/chat.exchange/chat.channel.";
+    private final String CHAT_DESTINATION = "/topic/chat.channel.";
 
-    @MessageMapping("/pub/chat.message.{channelId}")
+    @MessageMapping("chat.message.{channelId}")
     @Operation(summary = "메시지 전송", description = "메시지를 전송합니다.")
     @Transactional
     public void sendMessage(@DestinationVariable String channelId,
-                          ChatMessageRequest chatReqDto) {
+                          @Payload ChatMessageRequest chatReqDto,
+                          @Header("Authorization") String authorizationHeader) {
         try {
+            log.info("Received message for channel: {}, content: {}", channelId, chatReqDto);
+            
             if (chatReqDto.content() == null && chatReqDto.fileUrl() == null) {
                 throw new IllegalArgumentException("Message content cannot be empty");
             }
 
+            // 토큰 검증
+            String tokenWithoutBearer = jwtUtils.validateToken(authorizationHeader);
+            String userEmail = jwtUtils.getEmailFromToken(tokenWithoutBearer);
+            log.info("Authenticated user: {} for channel: {}", userEmail, channelId);
+
             // 메시지 저장 및 DTO 변환
             String chatId = dtoBuilder.saveChatMessage(channelId, chatReqDto);
             MessageDto messageDto = dtoBuilder.buildMessageDto(chatId, channelId, chatReqDto);
+            log.info("Message saved with ID: {} for channel: {}", chatId, channelId);
 
             // 메시지 전송
             messageService.sendMessageFromRabbitMQ(messageDto);
+            log.info("Message sent to RabbitMQ for channel: {}", channelId);
 
-            // 성공 응답
-            Map<String, Object> result = new HashMap<>();
-            result.put("chatId", chatId);
-            result.put("status", "success");
-            result.put("message", "Message sent successfully");
-            
-            simpMessagingTemplate.convertAndSend(CHAT_DESTINATION + channelId, result);
+            // 메시지 브로드캐스트 (messageDto 그대로)
+            simpMessagingTemplate.convertAndSend("/topic/chat.channel." + channelId, messageDto);
+            log.info("Broadcasted messageDto to /topic/chat.channel.{}", channelId);
 
         } catch (IllegalArgumentException e) {
             log.error("Invalid message content for channel: {}. Error: {}", channelId, e.getMessage());
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("status", "error");
             errorResult.put("message", "Invalid message content");
-            simpMessagingTemplate.convertAndSend(CHAT_DESTINATION + channelId, errorResult);
+            simpMessagingTemplate.convertAndSend("/topic/chat.channel." + channelId, errorResult);
         } catch (Exception e) {
             log.error("Error while sending message for channel: {}. Error: {}", channelId, e.getMessage(), e);
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("status", "error");
             errorResult.put("message", "Failed to send message");
-            simpMessagingTemplate.convertAndSend(CHAT_DESTINATION + channelId, errorResult);
+            simpMessagingTemplate.convertAndSend("/topic/chat.channel." + channelId, errorResult);
         }
     }
 
