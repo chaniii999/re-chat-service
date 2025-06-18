@@ -40,6 +40,24 @@ spring:
     password: guest
     stomp:
       port: 61613
+    listener:
+      simple:
+        concurrency: 10
+        max-concurrency: 20
+        prefetch: 100
+        retry:
+          enabled: true
+          initial-interval: 1000
+          max-attempts: 3
+          max-interval: 10000
+          multiplier: 2.0
+    template:
+      retry:
+        enabled: true
+        initial-interval: 1000
+        max-attempts: 3
+        max-interval: 10000
+        multiplier: 2.0
     
   # WebSocket 설정
   websocket:
@@ -71,3 +89,17 @@ logging:
     org.springframework.data.mongodb: DEBUG
     org.springframework.data.redis: DEBUG
     org.springframework.amqp: DEBUG
+
+# 모니터링 설정
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+  endpoint:
+    health:
+      show-details: always

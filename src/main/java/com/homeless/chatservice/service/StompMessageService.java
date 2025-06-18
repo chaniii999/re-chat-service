@@ -5,35 +5,50 @@ import com.homeless.chatservice.common.config.RabbitConfig;
 import com.homeless.chatservice.dto.MessageDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer;
+import org.springframework.amqp.rabbit.listener.api.ChannelAwareMessageListener;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.annotation.PreDestroy;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
+@RequiredArgsConstructor
 public class StompMessageService {
     private final RabbitTemplate rabbitTemplate;
     private final SimpMessagingTemplate messagingTemplate;
     private final RabbitConfig rabbitConfig;
     private final RabbitAdmin rabbitAdmin;
-    private final Map<String, SimpleMessageListenerContainer> channelListeners = new ConcurrentHashMap<>();
+    
+    @Qualifier("messageRedisTemplate")
+    private final RedisTemplate<String, MessageDto> messageRedisTemplate;
+    
+    @Qualifier("redisTemplate")
     private final RedisTemplate<String, String> redisTemplate;
     
+    private final Map<String, SimpleMessageListenerContainer> channelListeners = new ConcurrentHashMap<>();
+    private final ExecutorService messageExecutor = Executors.newFixedThreadPool(20);
+    
     @Value("${rabbitmq.chat-exchange.name}")
-    private String CHAT_EXCHANGE_NAME;
+    private String exchangeName;
 
     @Transactional
     public void sendMessageFromRabbitMQ(MessageDto message) {
@@ -55,11 +70,11 @@ public class StompMessageService {
             
             // RabbitMQ로 메시지 전송
             rabbitTemplate.convertAndSend(
-                    CHAT_EXCHANGE_NAME,
+                    exchangeName,
                     routingKey,
                     message
             );
-            log.info("Message sent to RabbitMQ - exchange: {}, routingKey: {}", CHAT_EXCHANGE_NAME, routingKey);
+            log.info("Message sent to RabbitMQ - exchange: {}, routingKey: {}", exchangeName, routingKey);
 
             // WebSocket으로 직접 메시지 전송
             messagingTemplate.convertAndSend(destination, message);
@@ -67,7 +82,7 @@ public class StompMessageService {
             
         } catch (Exception e) {
             log.error("Error sending message: {}", e.getMessage(), e);
-            throw e;
+            throw new RuntimeException("Failed to send message", e);
         }
     }
 
@@ -104,33 +119,72 @@ public class StompMessageService {
         SimpleMessageListenerContainer container = new SimpleMessageListenerContainer();
         container.setConnectionFactory(rabbitConfig.connectionFactory());
         container.setQueueNames("chat.channel." + channelId);
-
-        container.setMessageListener((message) -> {
-            try {
-                String jsonMessage = new String(message.getBody());
-                ObjectMapper objectMapper = new ObjectMapper();
-                MessageDto chatMessage = objectMapper.readValue(jsonMessage, MessageDto.class);
-
-                // WebSocket으로 메시지 전송
-                messagingTemplate.convertAndSend(
-                        "/exchange/chat.exchange/chat.channel." + channelId,
-                        chatMessage
-                );
-                log.info("Message forwarded to WebSocket for channel: {}", channelId);
-            } catch (Exception e) {
-                log.error("Error processing message for channel {}", channelId, e);
-            }
+        container.setConcurrentConsumers(5);
+        container.setMaxConcurrentConsumers(10);
+        container.setPrefetchCount(100);
+        
+        container.setMessageListener((ChannelAwareMessageListener) (message, channel) -> {
+            messageExecutor.submit(() -> {
+                try {
+                    String jsonMessage = new String(message.getBody());
+                    ObjectMapper objectMapper = new ObjectMapper();
+                    MessageDto chatMessage = objectMapper.readValue(jsonMessage, MessageDto.class);
+                    
+                    // Redis에 메시지 캐싱
+                    String cacheKey = "chat:channel:" + channelId + ":message:" + chatMessage.getChatId();
+                    messageRedisTemplate.opsForValue().set(cacheKey, chatMessage, Duration.ofMinutes(30));
+                    
+                    // WebSocket으로 메시지 전송
+                    messagingTemplate.convertAndSend(
+                            "/exchange/chat.exchange/chat.channel." + channelId,
+                            chatMessage
+                    );
+                    log.info("Message forwarded to WebSocket for channel: {}", channelId);
+                } catch (Exception e) {
+                    log.error("Error processing message for channel {}", channelId, e);
+                    // 에러 발생 시 재시도 로직
+                    handleMessageProcessingError(message, channelId);
+                }
+            });
         });
-
+        
         container.start();
         channelListeners.put(channelId, container);
     }
-
+    
+    private void handleMessageProcessingError(Message message, String channelId) {
+        try {
+            // 메시지 재처리 시도
+            rabbitTemplate.send("chat.channel." + channelId, message);
+        } catch (Exception e) {
+            log.error("Failed to retry message processing for channel {}", channelId, e);
+        }
+    }
+    
     public void removeChannel(String channelId) {
         SimpleMessageListenerContainer container = channelListeners.remove(channelId);
         if (container != null) {
             container.stop();
         }
         rabbitAdmin.deleteQueue("chat.channel." + channelId);
+        // Redis 캐시 정리
+        String pattern = "chat:channel:" + channelId + ":*";
+        Set<String> keys = redisTemplate.keys(pattern);
+        if (keys != null && !keys.isEmpty()) {
+            redisTemplate.delete(keys);
+        }
+    }
+    
+    @PreDestroy
+    public void cleanup() {
+        messageExecutor.shutdown();
+        try {
+            if (!messageExecutor.awaitTermination(60, TimeUnit.SECONDS)) {
+                messageExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            messageExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 }

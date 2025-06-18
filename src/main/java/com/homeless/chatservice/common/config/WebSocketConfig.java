@@ -44,6 +44,10 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public void configureClientInboundChannel(ChannelRegistration registration) {
         log.info("Configuring client inbound channel...");
         registration.interceptors(stompInterceptor);
+        registration.taskExecutor()
+            .corePoolSize(10)
+            .maxPoolSize(20)
+            .queueCapacity(100);
     }
 
     @Override
@@ -57,7 +61,6 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public void configureMessageBroker(MessageBrokerRegistry registry) {
         log.info("Configuring message broker with RabbitMQ host: {}", RABBITMQ_HOST);
         
-        // RabbitMQ 브로커 설정
         registry.enableStompBrokerRelay("/queue", "/topic", "/exchange", "/amq/queue")
                 .setAutoStartup(true)
                 .setRelayHost(RABBITMQ_HOST)

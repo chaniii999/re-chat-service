@@ -86,7 +86,11 @@ function random(arr) {
 }
 
 function generateRandomMessage() {
-  const messageTypes = ['TALK', 'IMAGE', 'FILE', 'SYSTEM'];
+  const messageTypes = [
+    'TALK',
+    'FILE',
+    'SYSTEM'
+  ];
   const messageType = random(messageTypes);
   
   const baseMessage = {
