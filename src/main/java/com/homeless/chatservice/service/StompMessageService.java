@@ -45,12 +45,11 @@ public class StompMessageService {
     private final RedisTemplate<String, String> redisTemplate;
     
     private final Map<String, SimpleMessageListenerContainer> channelListeners = new ConcurrentHashMap<>();
-    private final ExecutorService messageExecutor = Executors.newFixedThreadPool(50);
+    private final ExecutorService messageExecutor = Executors.newFixedThreadPool(100);
     
     @Value("${rabbitmq.chat-exchange.name}")
     private String exchangeName;
 
-    @Transactional
     public void sendMessageFromRabbitMQ(MessageDto message) {
         try {
             log.info("Attempting to send message: {}", message);
@@ -83,7 +82,7 @@ public class StompMessageService {
             log.info("Message sent to WebSocket - destination: {}", destination);
             
         } catch (Exception e) {
-            log.error("Error sending message: {}", e.getMessage(), e);
+            log.error("Error sending message: {}", e.getMessage());
             throw new RuntimeException("Failed to send message", e);
         }
     }
@@ -132,10 +131,6 @@ public class StompMessageService {
                     ObjectMapper objectMapper = new ObjectMapper();
                     MessageDto chatMessage = objectMapper.readValue(jsonMessage, MessageDto.class);
                     
-                    // Redis에 메시지 캐싱
-                    String cacheKey = "chat:channel:" + channelId + ":message:" + chatMessage.getChatId();
-                    messageRedisTemplate.opsForValue().set(cacheKey, chatMessage, Duration.ofMinutes(30));
-                    
                     // WebSocket으로 메시지 전송
                     messagingTemplate.convertAndSend(
                             "/exchange/chat.exchange/chat.channel." + channelId,
@@ -143,9 +138,7 @@ public class StompMessageService {
                     );
                     log.info("Message forwarded to WebSocket for channel: {}", channelId);
                 } catch (Exception e) {
-                    log.error("Error processing message for channel {}", channelId, e);
-                    // 에러 발생 시 재시도 로직
-                    handleMessageProcessingError(message, channelId);
+                    log.error("Error processing message for channel {}: {}", channelId, e.getMessage());
                 }
             });
         });
