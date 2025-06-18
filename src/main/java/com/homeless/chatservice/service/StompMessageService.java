@@ -45,7 +45,7 @@ public class StompMessageService {
     private final RedisTemplate<String, String> redisTemplate;
     
     private final Map<String, SimpleMessageListenerContainer> channelListeners = new ConcurrentHashMap<>();
-    private final ExecutorService messageExecutor = Executors.newFixedThreadPool(20);
+    private final ExecutorService messageExecutor = Executors.newFixedThreadPool(50);
     
     @Value("${rabbitmq.chat-exchange.name}")
     private String exchangeName;
@@ -119,9 +119,9 @@ public class StompMessageService {
         SimpleMessageListenerContainer container = new SimpleMessageListenerContainer();
         container.setConnectionFactory(rabbitConfig.connectionFactory());
         container.setQueueNames("chat.channel." + channelId);
-        container.setConcurrentConsumers(5);
-        container.setMaxConcurrentConsumers(10);
-        container.setPrefetchCount(100);
+        container.setConcurrentConsumers(20);
+        container.setMaxConcurrentConsumers(50);
+        container.setPrefetchCount(500);
         
         container.setMessageListener((ChannelAwareMessageListener) (message, channel) -> {
             messageExecutor.submit(() -> {

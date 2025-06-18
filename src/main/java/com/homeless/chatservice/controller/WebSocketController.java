@@ -64,9 +64,9 @@ public class WebSocketController {
             messageService.sendMessageFromRabbitMQ(messageDto);
             log.info("Message sent to RabbitMQ for channel: {}", channelId);
 
-            // 메시지 브로드캐스트 (messageDto 그대로)
-            simpMessagingTemplate.convertAndSend("/topic/chat.channel." + channelId, messageDto);
-            log.info("Broadcasted messageDto to /topic/chat.channel.{}", channelId);
+            // 메시지 브로드캐스트 (중복 제거: Controller에서는 제거)
+            // simpMessagingTemplate.convertAndSend("/topic/chat.channel." + channelId, messageDto);
+            // log.info("Broadcasted messageDto to /topic/chat.channel.{}", channelId);
 
         } catch (IllegalArgumentException e) {
             log.error("Invalid message content for channel: {}. Error: {}", channelId, e.getMessage());
