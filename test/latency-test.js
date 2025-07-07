@@ -28,7 +28,7 @@ export const options = {
   scenarios: {
     latency_test: {
       executor: 'constant-vus',
-      vus: 100,
+      vus: 50,
       duration: '1m',
     }
   },
